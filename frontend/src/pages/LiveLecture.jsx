@@ -21,6 +21,7 @@ import {
 import { formatDuration } from '../lib/utils'
 import toast from 'react-hot-toast'
 import AudioRecorder from '../utils/audioRecorder'
+import FinalNotesDocument from '../components/FinalNotesDocument'
 
 const mockTranscriptionChunks = [
   {
@@ -70,6 +71,7 @@ export default function LiveLecture() {
   const [transcriptionChunks, setTranscriptionChunks] = useState([])
   const [rawNotes, setRawNotes] = useState([])
   const [liveNotes, setLiveNotes] = useState([])
+  const [finalNotes, setFinalNotes] = useState(null)  // Final comprehensive notes
   const [audioLevel, setAudioLevel] = useState(0)
   const [lectureTitle, setLectureTitle] = useState('')
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
@@ -161,11 +163,13 @@ export default function LiveLecture() {
       if (data.type === 'transcription') {
         // Real-time transcription (every 20 seconds)
         console.log('📝 Transcription received:', data.content)
+        console.log('📝 Enhanced notes received:', data.enhanced_notes)
         
         setTranscriptionChunks(prev => [...prev, {
           id: data.timestamp,
           timestamp: new Date(data.timestamp).toLocaleTimeString(),
           text: data.content,
+          enhanced_notes: data.enhanced_notes || data.content,  // Use enhanced notes if available
           chunk_number: data.chunk_number,
           processed: false
         }])
@@ -211,6 +215,29 @@ export default function LiveLecture() {
         
       } else if (data.type === 'recording_stopped') {
         console.log('Recording stopped confirmation received')
+        
+      } else if (data.type === 'final_synthesis_started') {
+        console.log('🎓 Final synthesis started')
+        toast.loading('Creating comprehensive final notes...', { id: 'final-synthesis', duration: 10000 })
+        
+      } else if (data.type === 'final_notes') {
+        console.log('📚 Final comprehensive notes received:', data)
+        
+        // Store final notes separately
+        setFinalNotes({
+          title: data.title,
+          markdown: data.markdown,
+          sections: data.sections,
+          glossary: data.glossary,
+          key_takeaways: data.key_takeaways,
+          timestamp: new Date(data.timestamp).toLocaleTimeString()
+        })
+        
+        toast.success('Final comprehensive notes ready!', { id: 'final-synthesis', duration: 5000 })
+        
+      } else if (data.type === 'final_synthesis_error') {
+        console.error('Final synthesis error:', data.error)
+        toast.error('Error creating final notes', { id: 'final-synthesis' })
       }
     }
 
@@ -328,6 +355,7 @@ export default function LiveLecture() {
   }
 
   return (
+    <>
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-8">
@@ -574,14 +602,81 @@ export default function LiveLecture() {
                               <span className="text-xs text-blue-500 animate-pulse">Processing...</span>
                             )}
                           </div>
-                          <p className="text-sm text-secondary-700">{chunk.text}</p>
+                          {/* Display enhanced notes instead of raw transcription */}
+                          <div className="text-sm text-secondary-700 whitespace-pre-line">
+                            {chunk.enhanced_notes || chunk.text}
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
                 
-                {/* Structured Notes Section */}
+                {/* Final Comprehensive Notes Section */}
+                {finalNotes && (
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-8 rounded-xl border-4 border-amber-300 shadow-2xl mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-2xl font-bold text-amber-900 flex items-center">
+                        🎓 {finalNotes.title}
+                      </h2>
+                      <span className="text-xs bg-amber-200 text-amber-800 px-3 py-1 rounded-full font-semibold">
+                        Final Comprehensive Notes
+                      </span>
+                    </div>
+                    
+                    {/* Key Takeaways */}
+                    {finalNotes.key_takeaways && finalNotes.key_takeaways.length > 0 && (
+                      <div className="mb-6 p-4 bg-white rounded-lg border-2 border-amber-200">
+                        <h3 className="text-lg font-bold text-amber-900 mb-3">🎯 Key Takeaways</h3>
+                        <ul className="space-y-2">
+                          {finalNotes.key_takeaways.map((takeaway, idx) => (
+                            <li key={idx} className="text-sm text-gray-700 flex items-start">
+                              <span className="text-amber-600 mr-2">•</span>
+                              {takeaway}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {/* Sections */}
+                    {finalNotes.sections && finalNotes.sections.map((section, idx) => (
+                      <div key={idx} className="mb-6 p-4 bg-white rounded-lg border border-amber-200">
+                        <h3 className="text-xl font-bold text-gray-900 mb-3">{section.title}</h3>
+                        <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">
+                          {section.content}
+                        </div>
+                        {section.formulas && section.formulas.length > 0 && (
+                          <div className="mt-4 p-3 bg-gray-50 rounded border border-gray-200">
+                            <p className="text-xs font-semibold text-gray-600 mb-2">Formulas:</p>
+                            {section.formulas.map((formula, fIdx) => (
+                              <div key={fIdx} className="text-sm font-mono text-gray-800 mb-1">
+                                {formula}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    
+                    {/* Glossary */}
+                    {finalNotes.glossary && Object.keys(finalNotes.glossary).length > 0 && (
+                      <div className="p-4 bg-white rounded-lg border-2 border-amber-200">
+                        <h3 className="text-lg font-bold text-amber-900 mb-3">📖 Glossary</h3>
+                        <dl className="space-y-2">
+                          {Object.entries(finalNotes.glossary).map(([term, definition]) => (
+                            <div key={term} className="text-sm">
+                              <dt className="font-semibold text-gray-900">{term}</dt>
+                              <dd className="text-gray-700 ml-4">{definition}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Structured Notes Section (60s synthesis) */}
                 {liveNotes.map((note) => (
                   <div key={note.id} className="bg-gradient-to-br from-white to-secondary-50 p-6 rounded-lg border-2 border-primary-200 shadow-md">
                     <div className="flex items-center justify-between mb-3">
@@ -632,5 +727,14 @@ export default function LiveLecture() {
         </div>
       )}
     </div>
+
+    {/* Final Comprehensive Notes Document - Separate A4 Section */}
+    {finalNotes && (
+      <FinalNotesDocument 
+        finalNotes={finalNotes} 
+        lectureName={lectureTitle || location.state?.subjectName || 'Lecture'}
+      />
+    )}
+    </>
   )
 }

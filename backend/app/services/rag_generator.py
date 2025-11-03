@@ -34,17 +34,18 @@ async def generate_raw_notes(
         lecture_id: ID of the current lecture
         previous_notes: Recent notes for context (to avoid repetition)
     
-    Returns:
-        Generated raw notes as string
+    Generated raw notes as string
     """
     if previous_notes is None:
         previous_notes = []
     
-    # Build the prompt
+    # Build the prompt with error correction focus
     prompt_system = (
-        "You are an assistant creating very short (3-5 bullets) focused lecture notes from "
-        "a spoken transcript chunk (≈20s). Use the transcript primarily and optionally the supporting "
-        "context returned by RAG. Avoid repeating content that already appears in the recent raw notes memory."
+        "You are an intelligent educational assistant creating concise lecture notes from spoken transcription. "
+        "IMPORTANT: The transcription may contain speech recognition errors (misheard words, grammar issues). "
+        "Your job is to UNDERSTAND the intended meaning and create accurate, well-written notes that capture "
+        "what the speaker actually meant to say. Use the supporting context from documents to help correct errors "
+        "and provide accurate terminology. Avoid repeating content from recent notes."
     )
     
     # Limit previous notes to avoid token overflow
@@ -52,13 +53,21 @@ async def generate_raw_notes(
     context_text = "\n".join(context_chunks[:3])  # Limit context chunks
     
     prompt_user = (
-        f"Transcript chunk:\n\"\"\"\n{transcription_text}\n\"\"\"\n\n"
-        f"Recent raw notes memory (do NOT repeat):\n\"\"\"\n{recent_notes_text}\n\"\"\"\n\n"
-        f"Supporting context (RAG):\n\"\"\"\n{context_text}\n\"\"\"\n\n"
-        "Produce:\n- 3 to 5 ultra-concise bullet points (<=10 words each) capturing only the speaker's key ideas.\n"
-        "- Avoid textbook definitions, filler, or repeating anything already in Recent raw notes memory.\n"
-        "- If the transcript contains a single clear takeaway, include it as the first bullet.\n"
-        "- Return only the bullet text separated by newlines (no numbering or extra commentary)."
+        f"SPOKEN TRANSCRIPTION (may contain errors):\n\"\"\"\n{transcription_text}\n\"\"\"\n\n"
+        f"SUPPORTING CONTEXT FROM DOCUMENTS (use this to correct errors and add accuracy):\n\"\"\"\n{context_text}\n\"\"\"\n\n"
+        f"RECENT NOTES (do NOT repeat):\n\"\"\"\n{recent_notes_text}\n\"\"\"\n\n"
+        "YOUR TASK:\n"
+        "1. Read the transcription and UNDERSTAND what the speaker meant (even if words are wrong)\n"
+        "2. Use the document context to identify correct terminology and concepts\n"
+        "3. Create 3-5 clear, accurate bullet points that capture the intended meaning\n"
+        "4. Fix any obvious transcription errors (wrong words, grammar issues)\n"
+        "5. Use proper technical terms from the context when applicable\n\n"
+        "OUTPUT FORMAT:\n"
+        "- Write in clear, correct English\n"
+        "- Each bullet should be 8-15 words\n"
+        "- Focus on key concepts and ideas\n"
+        "- Return only bullet points (one per line, starting with '-')\n"
+        "- Do NOT copy transcription errors into notes"
     )
     
     try:
@@ -85,8 +94,8 @@ def _call_llm_for_raw_notes(prompt_system: str, prompt_user: str) -> str:
                     {"role": "system", "content": prompt_system},
                     {"role": "user", "content": prompt_user},
                 ],
-                temperature=0.15,
-                max_tokens=220,
+                temperature=0.2,  # Slightly higher for better understanding/correction
+                max_tokens=250,  # More tokens for better explanations
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:

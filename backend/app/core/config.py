@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     PROCESSED_DIR: str = "storage/processed"
     
     # AI/ML Settings
-    WHISPER_MODEL_SIZE: str = "base"  # tiny, base, small, medium, large
+    WHISPER_MODEL_SIZE: str = "small"  # tiny, base, small, medium, large (small is much better!)
     WHISPER_DEVICE: str = "cpu"
     WHISPER_COMPUTE_TYPE: str = "int8"
     

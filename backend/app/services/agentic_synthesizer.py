@@ -71,67 +71,107 @@ def _synthesize_sync(
     """Synchronous synthesis function."""
     
     if not groq_client:
+        print("⚠️  WARNING: GROQ client not available! Using fallback (will copy transcription errors)")
+        print("⚠️  Please set GROQ_API_KEY in .env file!")
         return _fallback_synthesis(full_transcription)
     
     # Build context
     context_text = "\n\n".join(rag_context[:5]) if rag_context else "No additional context available."
     previous_text = previous_notes if previous_notes else "This is the first set of notes for this lecture."
     
-    # System prompt for agentic synthesis
-    system_prompt = """You are an expert educational note-taker creating structured lecture notes.
+    # System prompt for agentic synthesis with deep knowledge integration
+    system_prompt = """You are an expert educational note-taker who MUST fix transcription errors and create accurate, educational notes.
+
+CRITICAL RULES:
+1. The transcription is FULL OF ERRORS from speech recognition (wrong words, grammar mistakes, nonsense phrases)
+2. Your job is to UNDERSTAND what the speaker ACTUALLY meant and write CORRECT notes
+3. DO NOT copy the transcription errors - FIX THEM!
+4. Use the document context to understand correct terminology and concepts
+5. Write clear, accurate, educational notes that make sense
+
+EXAMPLE OF WHAT YOU MUST DO:
+❌ BAD (copying errors): "humans have been devolving and learning from the past experience"
+✅ GOOD (fixed): "Humans have been evolving and learning from past experiences"
+
+❌ BAD: "machine learning is the code of many famous injectors built in Spanish"
+✅ GOOD: "Machine learning is a core technology used in many famous applications"
+
+❌ BAD: "machines are devolving by a living need to be programmed"
+✅ GOOD: "Machines are evolving beyond the need to be explicitly programmed"
 
 Your task:
-1. Analyze the lecture transcription carefully
-2. Identify main topics, subtopics, and key concepts
-3. Create well-organized, hierarchical notes
-4. Use clear markdown formatting
-5. Include important details and examples
-6. Make connections between concepts
-7. Avoid redundancy with previous notes
+1. READ the messy transcription and UNDERSTAND the actual topic
+2. IDENTIFY what concepts the speaker is trying to explain
+3. USE the document context to get correct information
+4. WRITE clear, accurate notes using proper terminology
+5. ORGANIZE information logically with headers and bullets
+6. EXPLAIN concepts properly - don't just list broken sentences
 
 Output format:
-- Use ## for main topics
-- Use ### for subtopics  
+- Use ## for main topics (e.g., ## Introduction to Machine Learning)
+- Use ### for subtopics (e.g., ### Types of Learning)
 - Use bullet points for key information
-- Use **bold** for important terms
-- Keep it concise but comprehensive
-- Focus on educational value"""
+- Use **bold** for important technical terms
+- Write in complete, correct sentences
+- Make it educational and easy to understand"""
 
-    # User prompt with all context
-    user_prompt = f"""Create structured lecture notes from this transcription:
+    # User prompt with enhanced instructions
+    user_prompt = f"""The transcription below is FULL OF ERRORS. Your job is to understand what was actually meant and create accurate notes.
 
-TRANSCRIPTION:
+MESSY TRANSCRIPTION (fix all errors!):
 \"\"\"
 {full_transcription}
 \"\"\"
 
-SUPPORTING CONTEXT FROM DOCUMENTS:
+COURSE DOCUMENTS (use these to understand correct concepts):
 \"\"\"
 {context_text}
 \"\"\"
 
-PREVIOUS NOTES (avoid repetition):
+PREVIOUS NOTES (for context, don't repeat):
 \"\"\"
 {previous_text}
 \"\"\"
 
-Generate comprehensive, well-structured notes that capture the key learning points from this lecture segment."""
+STEP-BY-STEP INSTRUCTIONS:
+1. READ the transcription carefully - it has many errors
+2. FIGURE OUT what topic the speaker is actually discussing (AI? Machine Learning? Neural Networks?)
+3. LOOK at the course documents to understand the correct concepts
+4. WRITE accurate, clear notes that explain what was MEANT (not what was said)
+5. FIX all grammar errors, wrong words, and nonsense phrases
+6. USE proper technical terminology from the documents
+7. ORGANIZE with clear headers (##, ###) and bullet points
+
+CRITICAL: Do NOT copy the transcription errors! Understand the meaning and write correct notes.
+
+Example transformation:
+Messy: "humans have been devolving and learning from the past experience since many years"
+Fixed: "Humans have been evolving and learning from past experiences over many years"
+
+Messy: "machine learning is the code of many famous injectors built in Spanish"  
+Fixed: "Machine learning is a core technology used in many famous applications"
+
+Now create accurate, educational notes:"""
 
     try:
+        print(f"🤖 Calling GROQ API for synthesis...")
         response = groq_client.chat.completions.create(
             model=settings.LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.3,  # Slightly creative but mostly factual
-            max_tokens=1000,  # Allow for detailed notes
+            temperature=0.3,  # Higher for better understanding/correction
+            max_tokens=1500,  # More tokens for comprehensive notes
         )
         
-        return response.choices[0].message.content.strip()
+        result = response.choices[0].message.content.strip()
+        print(f"✅ GROQ API synthesis successful! Generated {len(result)} characters")
+        return result
         
     except Exception as e:
-        print(f"Error in agentic synthesis: {e}")
+        print(f"❌ Error in agentic synthesis: {e}")
+        print(f"⚠️  Falling back to simple synthesis (will have errors!)")
         return _fallback_synthesis(full_transcription)
 
 

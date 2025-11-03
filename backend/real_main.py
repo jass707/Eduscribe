@@ -100,9 +100,18 @@ class AudioProcessor:
                     transcription_text = transcription_result.get("text", "").strip()
                     
                     if transcription_text:
-                        # Use simple notes generation (no API required)
-                        notes = self._generate_simple_notes(transcription_text, importance_result)
-                        logger.info(f"📝 Generated notes from transcription: '{transcription_text[:30]}...'")
+                        # Query documents for context
+                        from app.services.document_processor import query_documents
+                        context_chunks = query_documents(transcription_text, lecture_id, top_k=5)
+                        
+                        # Use enhanced RAG notes generation with document context
+                        notes = await self.generate_raw_notes(
+                            transcription_text=transcription_text,
+                            context_chunks=context_chunks,
+                            lecture_id=lecture_id,
+                            previous_notes=[]  # Can add history tracking later
+                        )
+                        logger.info(f"📝 Generated enhanced notes from transcription: '{transcription_text[:30]}...'")
                     else:
                         notes = "- No clear speech detected in this audio segment"
                     

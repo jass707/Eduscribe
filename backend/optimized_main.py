@@ -127,15 +127,29 @@ class OptimizedAudioProcessor:
                 
                 self.transcription_buffers[lecture_id].append(transcription_data)
                 
-                # Send transcription to frontend immediately
+                # Step 1.5: Generate enhanced notes from transcription using RAG
+                logger.info(f"📝 Generating enhanced notes with document context...")
+                rag_context = query_documents(transcription_text, lecture_id, top_k=5)
+                
+                from app.services.rag_generator import generate_raw_notes
+                enhanced_notes = await generate_raw_notes(
+                    transcription_text=transcription_text,
+                    context_chunks=rag_context,
+                    lecture_id=lecture_id,
+                    previous_notes=[]  # Can track history if needed
+                )
+                
+                # Send enhanced notes to frontend immediately
                 await websocket.send_json({
                     "type": "transcription",
                     "content": transcription_text,
+                    "enhanced_notes": enhanced_notes,  # Add enhanced notes
                     "timestamp": chunk_data["timestamp"],
                     "chunk_number": len(self.transcription_buffers[lecture_id])
                 })
                 
                 logger.info(f"✅ Transcription {len(self.transcription_buffers[lecture_id])}: {transcription_text[:50]}...")
+                logger.info(f"📝 Enhanced notes: {enhanced_notes[:80]}...")
                 
                 # Step 2: Check if it's time to synthesize (every 60 seconds = 3 chunks)
                 buffer_size = len(self.transcription_buffers[lecture_id])
@@ -238,6 +252,60 @@ class OptimizedAudioProcessor:
             logger.error(f"Error synthesizing notes: {e}", exc_info=True)
             await websocket.send_json({
                 "type": "synthesis_error",
+                "error": str(e)
+            })
+    
+    async def final_synthesis(self, lecture_id: str, websocket: WebSocket):
+        """Generate final comprehensive notes from all accumulated structured notes"""
+        try:
+            logger.info(f"🎓 Starting final comprehensive synthesis for {lecture_id}")
+            
+            # Get all structured notes from history
+            all_structured_notes = self.structured_notes_history[lecture_id]
+            
+            if not all_structured_notes:
+                logger.warning(f"No structured notes to synthesize for {lecture_id}")
+                return
+            
+            # Send "processing" message
+            await websocket.send_json({
+                "type": "final_synthesis_started",
+                "message": "Creating comprehensive final notes..."
+            })
+            
+            # Get RAG context from all transcriptions - use MORE context from PDF
+            all_transcriptions = " ".join([t["text"] for t in self.transcription_buffers[lecture_id]])
+            rag_context = query_documents(all_transcriptions, lecture_id, top_k=15)  # Increased for more PDF content
+            
+            # Import and use final synthesizer
+            from app.services.final_synthesizer import synthesize_final_notes
+            
+            final_result = await synthesize_final_notes(
+                lecture_id=lecture_id,
+                structured_notes_list=all_structured_notes,
+                rag_context=rag_context
+            )
+            
+            if final_result["success"]:
+                # Send final notes to frontend
+                await websocket.send_json({
+                    "type": "final_notes",
+                    "title": final_result["title"],
+                    "markdown": final_result["markdown"],
+                    "sections": final_result["sections"],
+                    "glossary": final_result["glossary"],
+                    "key_takeaways": final_result["key_takeaways"],
+                    "timestamp": int(time.time() * 1000)
+                })
+                
+                logger.info(f"✅ Final comprehensive notes generated and sent")
+            else:
+                logger.warning(f"Final synthesis returned no results")
+                
+        except Exception as e:
+            logger.error(f"Error in final synthesis: {e}", exc_info=True)
+            await websocket.send_json({
+                "type": "final_synthesis_error",
                 "error": str(e)
             })
 
@@ -368,6 +436,10 @@ async def websocket_endpoint(websocket: WebSocket, lecture_id: str):
                 # Final synthesis if there are remaining transcriptions
                 if len(processor.transcription_buffers[lecture_id]) > 0:
                     await processor.synthesize_notes(lecture_id, websocket)
+                
+                # FINAL COMPREHENSIVE SYNTHESIS
+                logger.info(f"🎓 Starting final comprehensive synthesis for {lecture_id}")
+                await processor.final_synthesis(lecture_id, websocket)
                 
                 await websocket.send_json({
                     "type": "recording_stopped",

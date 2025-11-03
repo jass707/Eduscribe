@@ -44,14 +44,16 @@ def transcribe_local(audio_path: str, beam_size: int = 5) -> Dict[str, Any]:
     # Optimized transcription settings for better quality
     segments, info = model.transcribe(
         audio_path, 
-        beam_size=beam_size,
+        beam_size=5,                      # Good balance of speed/quality
         language="en",                    # Force English for better accuracy
         condition_on_previous_text=True,  # Use context from previous segments
         temperature=0.0,                  # Deterministic output
         compression_ratio_threshold=2.4,  # Filter out low-quality segments
         log_prob_threshold=-1.0,          # Filter based on probability
         no_speech_threshold=0.6,          # Better silence detection
-        initial_prompt="This is a lecture or educational content with technical terms and academic language."
+        vad_filter=True,                  # Voice activity detection
+        vad_parameters=dict(min_silence_duration_ms=500),  # Better silence handling
+        initial_prompt="This is an educational lecture about artificial intelligence, machine learning, deep learning, neural networks, and computer science. The speaker discusses technical concepts, algorithms, and methodologies."
     )
 
     transcript_text = ""
