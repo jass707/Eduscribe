@@ -34,9 +34,24 @@ app.add_middleware(
 
 # Import services
 from app.services.transcribe_whisper import transcribe_local
-from app.services.document_processor import query_documents
+from app.services.document_processor_mongodb import query_documents, process_document  # MongoDB version!
 from app.services.agentic_synthesizer import synthesize_structured_notes, detect_topic_shift
 from app.services.importance_scorer import score_importance
+
+# Initialize MongoDB connection
+from database.mongodb_connection import (
+    init_mongodb,
+    save_transcription,
+    save_structured_notes,
+    save_final_notes,
+    create_lecture
+)
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables
+
+# Initialize MongoDB on startup
+init_mongodb()
+print("✅ MongoDB initialized for document storage and vector search")
 
 
 class OptimizedAudioProcessor:
@@ -129,7 +144,7 @@ class OptimizedAudioProcessor:
                 
                 # Step 1.5: Generate enhanced notes from transcription using RAG
                 logger.info(f"📝 Generating enhanced notes with document context...")
-                rag_context = query_documents(transcription_text, lecture_id, top_k=5)
+                rag_context = await query_documents(transcription_text, lecture_id, top_k=5)
                 
                 from app.services.rag_generator import generate_raw_notes
                 enhanced_notes = await generate_raw_notes(
@@ -138,6 +153,29 @@ class OptimizedAudioProcessor:
                     lecture_id=lecture_id,
                     previous_notes=[]  # Can track history if needed
                 )
+                
+                # Save transcription to MongoDB
+                chunk_index = len(self.transcription_buffers[lecture_id]) - 1
+                
+                # Score importance (pass dict, not string)
+                importance_result = score_importance({
+                    "text": transcription_text,
+                    "segments": transcription_result.get("segments", [])
+                })
+                importance = importance_result.get("importance", 0.5)
+                
+                try:
+                    await save_transcription(
+                        lecture_id=lecture_id,
+                        chunk_index=chunk_index,
+                        text=transcription_text,
+                        enhanced_notes=enhanced_notes,
+                        timestamp=chunk_data["timestamp"],
+                        importance=importance
+                    )
+                    logger.info(f"✅ Saved transcription to MongoDB: chunk {chunk_index}")
+                except Exception as db_error:
+                    logger.error(f"⚠️  Failed to save transcription to MongoDB: {db_error}")
                 
                 # Send enhanced notes to frontend immediately
                 await websocket.send_json({
@@ -205,7 +243,7 @@ class OptimizedAudioProcessor:
             
             # Get RAG context from all transcriptions
             combined_text = " ".join([t["text"] for t in transcriptions])
-            rag_context = query_documents(combined_text, lecture_id, top_k=5)
+            rag_context = await query_documents(combined_text, lecture_id, top_k=5)
             
             # Get previous structured notes for context
             previous_notes = None
@@ -231,6 +269,17 @@ class OptimizedAudioProcessor:
                 
                 # Store in history
                 self.structured_notes_history[lecture_id].append(structured_notes)
+                
+                # Save structured notes to MongoDB
+                try:
+                    await save_structured_notes(
+                        lecture_id=lecture_id,
+                        content=structured_notes,
+                        transcription_count=len(transcriptions)
+                    )
+                    logger.info(f"✅ Saved structured notes to MongoDB")
+                except Exception as db_error:
+                    logger.error(f"⚠️  Failed to save structured notes to MongoDB: {db_error}")
                 
                 # Send to frontend
                 await websocket.send_json({
@@ -275,7 +324,7 @@ class OptimizedAudioProcessor:
             
             # Get RAG context from all transcriptions - use MORE context from PDF
             all_transcriptions = " ".join([t["text"] for t in self.transcription_buffers[lecture_id]])
-            rag_context = query_documents(all_transcriptions, lecture_id, top_k=15)  # Increased for more PDF content
+            rag_context = await query_documents(all_transcriptions, lecture_id, top_k=15)  # Increased for more PDF content
             
             # Import and use final synthesizer
             from app.services.final_synthesizer import synthesize_final_notes
@@ -287,6 +336,20 @@ class OptimizedAudioProcessor:
             )
             
             if final_result["success"]:
+                # Save final notes to MongoDB
+                try:
+                    await save_final_notes(
+                        lecture_id=lecture_id,
+                        title=final_result["title"],
+                        markdown=final_result["markdown"],
+                        sections=final_result["sections"],
+                        glossary=final_result["glossary"],
+                        key_takeaways=final_result["key_takeaways"]
+                    )
+                    logger.info(f"✅ Saved final notes to MongoDB")
+                except Exception as db_error:
+                    logger.error(f"⚠️  Failed to save final notes to MongoDB: {db_error}")
+                
                 # Send final notes to frontend
                 await websocket.send_json({
                     "type": "final_notes",
@@ -365,12 +428,52 @@ async def create_lecture(data: dict):
 
 @app.post("/api/documents/lecture/{lecture_id}/upload")
 async def upload_documents(lecture_id: str, files: List[UploadFile] = File(...)):
-    """Upload documents for a lecture"""
-    return {
-        "message": "Documents uploaded successfully",
-        "lecture_id": lecture_id,
-        "files_count": len(files)
-    }
+    """Upload documents for a lecture and process them with MongoDB"""
+    try:
+        # Create upload directory
+        upload_dir = Path("storage/uploads") / lecture_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        processed_files = []
+        
+        for file in files:
+            # Save file
+            file_path = upload_dir / file.filename
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            logger.info(f"📄 Saved file: {file.filename}")
+            
+            # Process document and store in MongoDB
+            result = await process_document(
+                file_path=str(file_path),
+                lecture_id=lecture_id,
+                filename=file.filename
+            )
+            
+            processed_files.append({
+                "filename": file.filename,
+                "status": "success" if result.get("success") else "failed",
+                "document_id": result.get("document_id"),
+                "chunk_count": result.get("chunk_count", 0)
+            })
+            
+            logger.info(f"✅ Processed {file.filename}: {result.get('chunk_count', 0)} chunks stored in MongoDB")
+        
+        return {
+            "message": "Documents uploaded and processed successfully",
+            "lecture_id": lecture_id,
+            "files": processed_files,
+            "total_files": len(files)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error uploading documents: {e}")
+        return {
+            "error": str(e),
+            "lecture_id": lecture_id
+        }
 
 
 @app.post("/api/audio/lecture/{lecture_id}/chunk")

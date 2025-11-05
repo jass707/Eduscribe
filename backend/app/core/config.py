@@ -7,8 +7,13 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "EduScribe Backend"
     
-    # Database
-    DATABASE_URL: str = "sqlite:///./eduscribe.db"  # SQLite for development
+    # Database - MongoDB Atlas (much easier than PostgreSQL!)
+    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+    # For MongoDB Atlas (recommended):
+    # mongodb+srv://username:password@cluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
+    
+    # Legacy PostgreSQL (if you prefer complexity)
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/eduscribe")
     
     # Storage
     UPLOAD_DIR: str = "storage/uploads"

@@ -1,0 +1,26 @@
+feat: AI-enhanced note generation with final synthesis
+
+Major Features:
+- Enhanced note generation for 20s chunks with RAG
+- Structured notes every 60s with document context
+- Final comprehensive notes on lecture end
+- A4 downloadable/printable document with formulas
+- Proper LaTeX rendering with KaTeX
+- Concise bullet-point format with PDF integration
+
+Backend:
+- Upgraded Whisper model base to small
+- Enhanced agentic_synthesizer with error correction
+- New final_synthesizer service
+- Improved RAG context retrieval
+- Better formula extraction and formatting
+- 50/50 mix of transcription and PDF content
+
+Frontend:
+- New FinalNotesDocument component
+- Download as Markdown
+- Save as PDF via print
+- Print-optimized CSS
+- Beautiful formatting
+
+Documentation added for setup and deployment
